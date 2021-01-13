@@ -322,7 +322,7 @@ async def stop(session: CommandSession):
         await send_at(session,"未开始")
         return
 
-@on_command('kick', aliases=('kick','加入','坐下'),only_to_me = False, permission = perm.GROUP)
+@on_command('kick', aliases=('踢人'),only_to_me = False, permission = perm.GROUP)
 async def kick(session: CommandSession):
     group_id = session.event.group_id
     user_id = session.event.user_id
@@ -366,3 +366,69 @@ async def kick_parser(session:CommandSession):
         session.state['at']=args[0]
 
 
+@on_command('resend', aliases=('重发'),only_to_me = False, permission = perm.GROUP)
+async def resend(session: CommandSession):
+    group_id = session.event.group_id
+    user_id = session.event.user_id
+
+    if not group_id:
+        await session.send('请在群聊中使用狼人杀功能')
+        return
+    
+    if user_id == 80000000:
+        await session.send('请解除匿名后再使用狼人杀功能')
+        return
+    if not group_id in game:
+        await send_at(session,'当前群还没有人使用狼人杀功能，请使用set命令开始')
+        return
+    g=game[group_id]
+    if g.running:
+        if user_id!=g.player[0]:
+            await send_at(session,"只有法官可以要求重新发牌")
+            return 
+        else:
+            s="您是法官\n"
+            wolfs=[]
+            for i in range(g.n):
+                s+="{}号：{}\n".format(i+1,name[g.Is[i]])
+                if g.Is[i] in wolf:
+                    wolfs.append(i+1)
+            await send_private(g.player[0],s)
+            for i in range(g.n):
+                s="您是{}号，您的身份是：{}".format(i+1,name[g.Is[i]])
+                if i+1 in wolfs:
+                    s+="\n您的狼队友有{}".format(wolfs)
+                await send_private(g.player[i+1],s)
+            await send_at(session,g.preview())
+            return
+    else:
+        await send_at(session,"未开始")
+        return
+
+@on_command('wait_resend', aliases=('准备重发'),only_to_me = False, permission = perm.GROUP)
+async def resend(session: CommandSession):
+    group_id = session.event.group_id
+    user_id = session.event.user_id
+
+    if not group_id:
+        await session.send('请在群聊中使用狼人杀功能')
+        return
+    
+    if user_id == 80000000:
+        await session.send('请解除匿名后再使用狼人杀功能')
+        return
+    if not group_id in game:
+        await send_at(session,'当前群还没有人使用狼人杀功能，请使用set命令开始')
+        return
+    g=game[group_id]
+    if g.running:
+        if user_id!=g.player[0]:
+            await send_at(session,"只有法官可以要求重新发牌")
+            return 
+        else:
+            for uid in g.player:
+                await send_private(uid,"等待重新发牌")
+            return
+    else:
+        await send_at(session,"未开始")
+        return
