@@ -2,9 +2,7 @@
 # -*- coding: utf-8 -*-
 __author__ = 'QAQAutoMaton'
 
-
 from nonebot.default_config import *
 
 COMMAND_START = {'#'}
-
-werewolf_admin=[]
+werewolf_admin = [568493420]
