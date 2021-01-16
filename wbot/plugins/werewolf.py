@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 __author__ = 'QAQAutoMaton'
 
+
 import asyncio
 import random
 from enum import Enum
@@ -46,12 +47,13 @@ class Player:
         self.alive = True
 
     def briefing(self, show_role: bool = False) -> str:
-        return f'{cq_at(self.uid)} {self.role if show_role else ""} {"" if self.alive else "[已死亡]"}'
+        return f'{cq_at(self.uid)} {self.role.value if show_role else ""} {"" if self.alive else "[已死亡]"}'
 
     def set_player_dead(self) -> None:
         if not self.alive:
             raise Player.PlayerDead
         self.alive = False
+
 
 class WerewolfGame:
     ROLE_MAPPING = {
@@ -137,7 +139,7 @@ class WerewolfGame:
             if self.game_pool[x].role == Roles.werewolf:
                 werewolf.append(x + 1)
             awaiter.append(send_private(self.game_pool[x].uid,
-                                        f'你是 {x + 1}号, 你的身份是 {self.game_pool[x].role.value}'))
+                                        f'你是 {x + 1} 号, 你的身份是 {self.game_pool[x].role.value}'))
             all_roles.append(f'{x + 1}: {self.game_pool[x]}')
         all_roles = '\n'.join(all_roles)
         awaiter.append(send_private(self._master, f'您是法官\n{all_roles}'))
@@ -230,7 +232,7 @@ async def setting(session: CommandSession) -> None:
         return
     if group_id in game:
         if not game[group_id].empty():
-            await send_at(session, ' 当前桌还有人')
+            await send_at(session, '当前桌还有人')
             return
 
     if 'role' not in session.state:
@@ -240,6 +242,7 @@ async def setting(session: CommandSession) -> None:
         role = session.state['role']
         if not (set(role) & set(config_arg) == set(role)):
             await send_at(session, "配置不合法")
+            return
 
         game[group_id] = WerewolfGame(role)
         await game[group_id].join(user_id)
@@ -480,6 +483,7 @@ async def kill(session: CommandSession):
         game_instance = game[group_id]
         if user_id != game_instance.master:
             await send_at(session, "你不是法官，无权操作")
+            return
         await send_at(session, f"{id_}号 死了。\n" + game_instance.game_briefing())
     except WerewolfGame.GameNotStarted:
         await send_at(session, "未开始")
