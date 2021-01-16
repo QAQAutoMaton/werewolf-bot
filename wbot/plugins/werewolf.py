@@ -6,6 +6,7 @@ import nonebot
 import random
 from config import *
 from nonebot import on_command, CommandSession, message
+from nonebot import on_request, RequestSession
 
 from nonebot import permission as perm
 
@@ -32,6 +33,7 @@ class Game:
         self.player = []
         self.type = []
         self.Is = []
+        self.alive=[]
         self.running = False
 
     def empty(self, user_id=-1):
@@ -45,6 +47,7 @@ class Game:
         self.type = s
         self.player = [0] * (n + 1)
         self.Is = []
+        self.alive=[True]*(n+1)
         self.running = False
 
     def sit(self, uid, at):
@@ -78,7 +81,7 @@ class Game:
 
     def preview(self):
         s = ""
-        if self.running == 1:
+        if self.running:
             s = "游戏已开始，"
         s += "配置为："
         for i in range(len(tp)):
@@ -94,8 +97,9 @@ class Game:
                 s += "空"
             else:
                 s += cq_at(self.player[i])
+            if self.running and not self.alive[i]:
+                s+="「已死亡」"
         s += "\n为获取身份，请添加bot为好友。"
-        print(s)
         return s
 
 
@@ -109,7 +113,6 @@ async def send_at(session: CommandSession, s):
 
 
 async def send_private(uid, s):
-    print(uid, s)
     bot = nonebot.get_bot()
     await bot.send_private_msg(user_id=uid, message=s)
 
@@ -331,11 +334,11 @@ async def stop(session: CommandSession):
         else:
             s = "游戏已结束，身份为：\n"
             for i in range(g.n):
-                s += "{}号({})：{}\n".format(i + 1, cq_at(g.player[i + 1]), name[g.Is[i]])
+                s += "{}号({})：{}{}\n".format(i + 1, cq_at(g.player[i + 1]), name[g.Is[i]],("" if g.alive[i+1] else "「已死亡」") )
             g.player = [0] * (g.n + 1)
             g.Is = []
             g.running = False
-            print(s)
+            g.alive=[True]*(g.n+1)
             await send_at(session, s)
             return
     else:
@@ -343,7 +346,7 @@ async def stop(session: CommandSession):
         return
 
 
-@on_command('kick', aliases='踢人', only_to_me=False, permission=perm.GROUP)
+@on_command('kick', aliases=('踢人'), only_to_me=False, permission=perm.GROUP)
 async def kick(session: CommandSession):
     group_id = session.event.group_id
     user_id = session.event.user_id
@@ -387,7 +390,7 @@ async def kick_parser(session: CommandSession):
         session.state['at'] = args[0]
 
 
-@on_command('resend', aliases='重发', only_to_me=False, permission=perm.GROUP)
+@on_command('resend', aliases=('重发'), only_to_me=False, permission=perm.GROUP)
 async def resend(session: CommandSession):
     group_id = session.event.group_id
     user_id = session.event.user_id
@@ -426,9 +429,8 @@ async def resend(session: CommandSession):
         await send_at(session, "未开始")
         return
 
-
-@on_command('wait_resend', aliases='准备重发', only_to_me=False, permission=perm.GROUP)
-async def resend(session: CommandSession):
+@on_command('kill', aliases=('杀'), only_to_me=False, permission=perm.GROUP)
+async def kill(session: CommandSession):
     group_id = session.event.group_id
     user_id = session.event.user_id
 
@@ -445,12 +447,72 @@ async def resend(session: CommandSession):
     g = game[group_id]
     if g.running:
         if user_id != g.player[0]:
-            await send_at(session, "只有法官可以要求重新发牌")
+            await send_at(session, "你不是法官，无权操作")
             return
         else:
-            for uid in g.player:
-                await send_private(uid, "等待重新发牌")
+
+            if 'id' not in session.state:
+                await send_at(session, "用法：#kill 位置\n如： #kill 1")
+                return
+            try:
+                id = int(session.state['id'])
+            except ValueError:
+                await send_at(session, "位置为一个[1..人数]之间的整数")
+                return
+            if not (1<=id and id<=g.n):
+                await send_at(session, "位置为一个[1..人数]之间的整数")
+                return
+            if not g.alive[id]:
+                await send_at(session, "{}号已经死过了。".format(id))
+                return
+            g.alive[id]=False
+            s="当前还活着的有：\n"
+            for i in range(g.n):
+                if g.alive[i+1]:
+                    s += "{}号：{}\n".format(i+1, name[g.Is[i]])
+            await send_private(g.player[0], s)
+            await send_at(session, "{}号 死了。\n".format(id)+g.preview())
             return
     else:
         await send_at(session, "未开始")
         return
+
+
+@kill.args_parser
+async def kill_parser(session: CommandSession):
+    args = session.current_arg_text.strip().split()
+    if len(args) == 1:
+        session.state['id'] = args[0]
+
+@on_command('rand', aliases=('随机'), only_to_me=False, permission=perm.EVERYBODY)
+async def rand(session: CommandSession):
+    if 'n' not in session.state:
+        await send_at(session, "用法：#rand n 表示随机一个1..n之间的数")
+        return
+    try:
+        n = int(session.state['n'])
+    except ValueError:
+        await send_at(session, "n是一个>0的整数")
+        return
+    if n<=0:
+        await send_at(session, "n是一个>0的整数")
+        return
+
+    if not session.event.group_id:
+        await session.send(str(random.randint(1,n)))
+        return
+    await send_at(session,str(random.randint(1,n)))
+
+
+@rand.args_parser
+async def rand_parser(session: CommandSession):
+    args = session.current_arg_text.strip().split()
+    if len(args) == 1:
+        session.state['n']=args[0]
+
+
+@on_request('friend')
+async def friend_request(session: RequestSession):
+    await session.approve()
+
+
