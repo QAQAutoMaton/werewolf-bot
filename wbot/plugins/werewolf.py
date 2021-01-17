@@ -38,7 +38,7 @@ class Roles(Enum):
 
 
 class Player:
-    class PlayerDead(BaseException):
+    class PlayerAlreadyDead(BaseException):
         pass
 
     def __init__(self, uid: int, role: Roles):
@@ -51,7 +51,7 @@ class Player:
 
     def set_player_dead(self) -> None:
         if not self.alive:
-            raise Player.PlayerDead
+            raise Player.PlayerAlreadyDead
         self.alive = False
 
 
@@ -169,7 +169,7 @@ class WerewolfGame:
         if not self.running:
             raise WerewolfGame.GameNotStarted
         self.clear()
-        return self.game_briefing(show_role=True)
+        return self.game_briefing(show_role=True, header='已经结束')
 
     def clear(self) -> None:
         self.running = False
@@ -387,8 +387,7 @@ async def stop(session: CommandSession):
     if user_id != game_instance.master:
         await send_at(session, "你不是法官，无权结束")
     try:
-        game_instance.stop()
-        await send_at(session, game_instance.game_briefing(show_role=True, header='已经结束'))
+        await send_at(session, game_instance.stop())
     except WerewolfGame.GameNotStarted:
         await send_at(session, '未开始')
 
@@ -489,7 +488,7 @@ async def kill(session: CommandSession):
         await send_at(session, f"{id_}号 死了。\n" + game_instance.game_briefing())
     except WerewolfGame.GameNotStarted:
         await send_at(session, "未开始")
-    except Player.PlayerDead:
+    except Player.PlayerAlreadyDead:
         await send_at(session, f"{id_}号已经死过了。")
     except IndexError:
         await send_at(session, "位置为一个[1..人数]之间的整数")
