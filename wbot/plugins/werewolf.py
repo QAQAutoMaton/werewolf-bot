@@ -276,10 +276,12 @@ async def sit(session: CommandSession):
         return
 
     if 'master' in session.state:
-        game[group_id].master = user_id
-        await send_at(session, "成为法官成功")
+        try:
+            game[group_id].master = user_id
+            await send_at(session, "成为法官成功")
+        except WerewolfGame.GameStarted:
+            await send_at(session, "游戏已经开始")
         return
-
     try:
         await game[group_id].join(user_id)
         await send_at(session, "加入成功，" + game[group_id].game_briefing())
