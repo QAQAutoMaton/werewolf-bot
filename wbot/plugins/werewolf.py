@@ -45,22 +45,26 @@ class PlayerWithoutRole:
 
 
 class Player(PlayerWithoutRole):
-    class PlayerAlreadyDead(BaseException):
+    class PlayerAlreadyDead(Exception):
         pass
 
     def __init__(self, uid: int, role: Roles, seat: int):
         super().__init__(uid, seat)
         self.role = role
-        self.alive = True
+        self._alive = True
+
+    @property
+    def alive(self) -> bool:
+        return self._alive
 
     def briefing(self, show_role: bool = False) -> str:
         return f'{self.seat}: {cq_at(self.uid)} ' \
                f'{self.role.value if show_role else ""} {"" if self.alive else "[已死亡]"}'
 
     def set_player_dead(self) -> None:
-        if not self.alive:
+        if not self._alive:
             raise Player.PlayerAlreadyDead
-        self.alive = False
+        self._alive = False
 
     @classmethod
     def from_player(cls, old_player: PlayerWithoutRole, role: Roles) -> Player:
@@ -77,25 +81,31 @@ class WerewolfGame:
         'n': Roles.witch
     }
 
-    class GameException(BaseException):
+    class BaseGameException(Exception):
         pass
 
-    class PlayerFull(GameException):
+    class PlayerException(BaseGameException):
+        pass
+
+    class GameException(BaseGameException):
+        pass
+
+    class PlayerFull(PlayerException):
         pass
 
     class GameStarted(GameException):
         pass
 
-    class PlayerNotEnough(GameException):
+    class PlayerNotEnough(PlayerException):
         pass
 
-    class PlayerInReadyPool(GameException):
+    class PlayerInReadyPool(PlayerException):
         pass
 
     class GameNotStarted(GameException):
         pass
 
-    class PlayerSeatTaken(GameException):
+    class PlayerSeatTaken(PlayerException):
         pass
 
     class JudgeNotFound(GameException):
@@ -181,6 +191,7 @@ class WerewolfGame:
         if self.running:
             raise WerewolfGame.GameStarted
         if self._master == seat_or_uid:
+            self._master = 0
             return seat_or_uid
         async with self._lock:
             if seat_or_uid > 50:
@@ -457,7 +468,7 @@ async def kick(session: CommandSession):
 
     try:
         w = game[group_id].kick(at)
-        await send_at(session, "踢出{}成功，".format(cq_at(w)) + game[group_id].game_briefing())
+        await send_at(session, f"踢出{cq_at(w)}成功，\n{game[group_id].game_briefing()}")
     except WerewolfGame.GameStarted:
         await send_at(session, "游戏已经开始")
     except IndexError:
