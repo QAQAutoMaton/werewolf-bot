@@ -81,6 +81,18 @@ class WerewolfGame:
         'n': Roles.witch
     }
 
+    class BriefingCache:
+        def __init__(self, briefing: str, *, changed: bool = False):
+            self.briefing = briefing
+            self._changed = changed
+
+        def set_changed(self) -> None:
+            self._changed = True
+
+        @property
+        def is_changed(self) -> bool:
+            return self._changed
+
     class BaseGameException(Exception):
         pass
 
@@ -120,6 +132,7 @@ class WerewolfGame:
         self._lock: asyncio.Lock = asyncio.Lock()
         self.role: str = role
         self.running: bool = False
+        self.briefing_cache = self.BriefingCache('', changed=True)
 
     @property
     def master(self) -> int:
@@ -134,6 +147,7 @@ class WerewolfGame:
     async def join(self, uid: int, seat: int) -> None:
         if seat == 0:
             self.master = uid
+            self.briefing_cache.set_changed()
         async with self._lock:
             if len(self.uid_pool) >= self.player_count:
                 raise WerewolfGame.PlayerFull
@@ -143,6 +157,7 @@ class WerewolfGame:
                 raise WerewolfGame.PlayerSeatTaken
             self.uid_pool.update({uid: seat})
             self.player_pool[seat - 1] = PlayerWithoutRole(uid, seat)
+            self.briefing_cache.set_changed()
 
     async def start(self) -> None:
         if self.running:
@@ -159,6 +174,7 @@ class WerewolfGame:
         self.game_pool.sort(key=lambda x: x.uid)
         for id_ in range(self.player_count):
             assert id_ + 1 == self.game_pool[id_].seat
+        self.briefing_cache.set_changed()
         await self.notify()
 
     async def notify_to_master(self) -> None:
@@ -192,6 +208,7 @@ class WerewolfGame:
             raise WerewolfGame.GameStarted
         if self._master == seat_or_uid:
             self._master = 0
+            self.briefing_cache.set_changed()
             return seat_or_uid
         async with self._lock:
             if seat_or_uid > 50:
@@ -199,6 +216,7 @@ class WerewolfGame:
                 if uid in self.uid_pool:
                     seat = self.uid_pool.pop(uid)
                     self.player_pool[seat - 1] = None
+                    self.briefing_cache.set_changed()
                     return uid
             else:
                 seat = seat_or_uid
@@ -206,6 +224,7 @@ class WerewolfGame:
                     uid = self.player_pool[seat - 1].uid
                     self.uid_pool.pop(uid)
                     self.player_pool[seat - 1] = None
+                    self.briefing_cache.set_changed()
                     return uid
             raise IndexError
 
@@ -224,11 +243,17 @@ class WerewolfGame:
         self.game_pool = []
         self.player_pool = [None] * self.player_count
         self._master = 0
+        self.briefing_cache.set_changed()
 
     def empty(self) -> bool:
         return not self.uid_pool
 
     def game_briefing(self, *, show_role: bool = False, header: str = '尚未开始') -> str:
+        if self.briefing_cache.is_changed:
+            self.briefing_cache = self.BriefingCache(self._game_briefing(show_role=show_role, header=header))
+        return self.briefing_cache.briefing
+
+    def _game_briefing(self, *, show_role: bool = False, header: str) -> str:
         game_setting = []
         for role_str, role_description in self.ROLE_MAPPING:
             count = self.role.count(role_str)
@@ -252,6 +277,7 @@ class WerewolfGame:
         if not self.running:
             raise WerewolfGame.GameNotStarted
         self.game_pool[index - 1].set_player_dead()
+        self.briefing_cache.set_changed()
 
 
 game: dict[int, WerewolfGame] = {}
@@ -537,7 +563,8 @@ async def kill(session: CommandSession):
         if user_id != game_instance.master:
             await send_at(session, "你不是法官，无权操作")
             return
-        await send_at(session, f"{id_}号 死了。\n" + game_instance.game_briefing())
+        await asyncio.gather(send_at(session, f"{id_}号 死了。\n" + game_instance.game_briefing()),
+                             game_instance.notify_to_master())
     except WerewolfGame.GameNotStarted:
         await send_at(session, "未开始")
     except Player.PlayerAlreadyDead:
