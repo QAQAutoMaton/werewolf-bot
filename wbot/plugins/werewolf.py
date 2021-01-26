@@ -5,6 +5,7 @@ __author__ = 'QAQAutoMaton'
 
 import asyncio
 import random
+import logging
 from enum import Enum
 from typing import Optional
 
@@ -17,7 +18,7 @@ from config import *
 config_arg = "pwbynls"
 
 
-def cq_at(uid) -> str:
+def cq_at(uid: int) -> str:
     return f"[CQ:at,qq={uid}] "
 
 
@@ -26,6 +27,9 @@ USAGE_TEXT = """用法：#set 配置 位置
 其中p是平民，w是狼，b是白狼王，y是预言家，n是女巫，l是猎人，s是守卫
 位置为0和人数之间的整数，其中0是法官
 """
+
+logger = logging.getLogger('werewolf-bot')
+logger.setLevel(logging.DEBUG)
 
 
 class Roles(Enum):
@@ -83,11 +87,12 @@ class WerewolfGame:
 
     class BriefingCache:
         def __init__(self, briefing: str, *, changed: bool = False):
-            self.briefing = briefing
+            self.briefing: str = briefing
             self._changed = changed
 
         def set_changed(self) -> None:
             self._changed = True
+            logger.debug('Set cache has been changed')
 
         @property
         def is_changed(self) -> bool:
@@ -148,6 +153,7 @@ class WerewolfGame:
         if seat == 0:
             self.master = uid
             self.briefing_cache.set_changed()
+            return
         async with self._lock:
             if len(self.uid_pool) >= self.player_count:
                 raise WerewolfGame.PlayerFull
@@ -155,26 +161,34 @@ class WerewolfGame:
                 raise WerewolfGame.PlayerInReadyPool
             if self.player_pool[seat - 1] is not None:
                 raise WerewolfGame.PlayerSeatTaken
+            logger.debug('Set %d to user %d', seat, uid)
             self.uid_pool.update({uid: seat})
             self.player_pool[seat - 1] = PlayerWithoutRole(uid, seat)
             self.briefing_cache.set_changed()
 
     async def start(self) -> None:
         if self.running:
+            logger.warning('Game is running')
             raise WerewolfGame.GameStarted
         if self.player_count != len(self.uid_pool):
+            logger.warning('Player not enough')
             raise WerewolfGame.PlayerNotEnough
         if self.master == 0:
+            logger.warning('Judge not found')
             raise WerewolfGame.JudgeNotFound
         self.running = True
         random.shuffle(self.player_pool)
         for role_str, role_ in self.ROLE_MAPPING.items():
             for _ in range(self.role.count(role_str)):
                 self.game_pool.append(Player.from_player(self.player_pool.pop(), role_))
-        self.game_pool.sort(key=lambda x: x.uid)
+        self.game_pool.sort(key=lambda x: x.seat)
         for id_ in range(self.player_count):
-            assert id_ + 1 == self.game_pool[id_].seat
+            try:
+                assert id_ + 1 == self.game_pool[id_].seat
+            except AssertionError:
+                logger.critical('Caught assert error')
         self.briefing_cache.set_changed()
+        logger.debug('Game start successfully, calling notify function')
         await self.notify()
 
     async def notify_to_master(self) -> None:
@@ -251,6 +265,9 @@ class WerewolfGame:
     def game_briefing(self, *, show_role: bool = False, header: str = '尚未开始') -> str:
         if self.briefing_cache.is_changed:
             self.briefing_cache = self.BriefingCache(self._game_briefing(show_role=show_role, header=header))
+            logger.debug('Reset cache => %s', self.briefing_cache.briefing)
+        else:
+            logger.debug('Hit cache => %s', self.briefing_cache.briefing)
         return self.briefing_cache.briefing
 
     def _game_briefing(self, *, show_role: bool = False, header: str) -> str:
@@ -258,7 +275,7 @@ class WerewolfGame:
         for role_str, role_description in self.ROLE_MAPPING.items():
             count = self.role.count(role_str)
             if count > 0:
-                game_setting.append(f'{role_description}x{count}')
+                game_setting.append(f'{role_description.value}x{count}')
         game_setting = ', '.join(game_setting)
         s = f'游戏{"已经开始" if self.running else header}, 配置为: {game_setting}\n法官: ' \
             f'{cq_at(self.master) if self._master > 0 else "null"}\n玩家列表:'
@@ -269,7 +286,7 @@ class WerewolfGame:
         else:
             for x in range(self.player_count):
                 element = self.player_pool[x]
-                player_list.append(f'{x}: {cq_at(element.uid) if element is not None else "(Empty)"}')
+                player_list.append(f'{x + 1}: {cq_at(element.uid) if element is not None else "(Empty)"}')
         player_list = '\n'.join(player_list)
         return f'{s}\n{player_list}\n为获取身份，请添加bot为好友。"'
 
@@ -445,7 +462,7 @@ async def start(session: CommandSession):
         await send_at(session, '当前群还没有人使用狼人杀功能，请使用set命令开始')
         return
     g = game[group_id]
-    if user_id not in g.player_pool:
+    if user_id not in g.uid_pool and user_id != g.master:
         await send_at(session, "你还没有加入游戏")
         return
     try:
