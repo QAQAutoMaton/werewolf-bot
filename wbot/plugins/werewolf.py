@@ -255,7 +255,7 @@ class WerewolfGame:
 
     def _game_briefing(self, *, show_role: bool = False, header: str) -> str:
         game_setting = []
-        for role_str, role_description in self.ROLE_MAPPING:
+        for role_str, role_description in self.ROLE_MAPPING.items():
             count = self.role.count(role_str)
             if count > 0:
                 game_setting.append(f'{role_description}x{count}')
@@ -318,8 +318,20 @@ async def setting(session: CommandSession) -> None:
             await send_at(session, "配置不合法")
             return
 
+        if not (seat := session.state.get('seat')):
+            await send_at(session, USAGE_TEXT)
+            return
+
+        try:
+            seat = int(seat)
+            if seat < 0 or seat > len(role):
+                raise ValueError
+        except ValueError:
+            await send_at(session, "位置为一个[0..人数]之间的整数")
+            return
+
         game[group_id] = WerewolfGame(role)
-        await game[group_id].join(user_id)
+        await game[group_id].join(user_id, seat)
 
         await send_at(session, "创建成功，" + game[group_id].game_briefing())
 
@@ -329,8 +341,9 @@ async def setting(session: CommandSession) -> None:
 @setting.args_parser
 async def setting_parser(session: CommandSession):
     args = session.current_arg_text.strip().split()
-    if len(args) == 1:
+    if len(args) == 2:
         session.state['role'] = args[0]
+        session.state['seat'] = args[1]
 
 
 @on_command('sit', aliases=('jr', '加入', '坐下'), only_to_me=False, permission=perm.GROUP)
