@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 from __future__ import annotations
-__author__ = 'QAQAutoMaton'
+__author__ = 'QAQAutoMaton and KunoiSayami'
 
 import asyncio
 import random
@@ -152,6 +152,7 @@ class WerewolfGame:
     async def join(self, uid: int, seat: int) -> None:
         if seat == 0:
             self.master = uid
+            logger.debug('Set master to user %d', uid)
             self.briefing_cache.set_changed()
             return
         async with self._lock:
@@ -286,6 +287,8 @@ class WerewolfGame:
     def kill(self, index: int) -> None:
         if not self.running:
             raise WerewolfGame.GameNotStarted
+        if index == 0:
+            raise IndexError
         self.game_pool[index - 1].set_player_dead()
         self.briefing_cache.set_changed()
 
@@ -486,6 +489,7 @@ async def stop(session: CommandSession):
     if user_id != game_instance.master:
         await send_at(session, "你不是法官，无权结束")
     try:
+        logger.info('Stopping %d game...', group_id)
         await send_at(session, game_instance.stop())
     except WerewolfGame.GameNotStarted:
         await send_at(session, '未开始')
@@ -541,10 +545,9 @@ async def resend(session: CommandSession):
     if user_id == 80000000:
         await session.send('请解除匿名后再使用狼人杀功能')
         return
-    if group_id not in game:
+    if not (game_instance := game.get(group_id)):
         await send_at(session, '当前群还没有人使用狼人杀功能，请使用set命令开始')
         return
-    game_instance = game[group_id]
 
     if user_id != game_instance.master:
         await send_at(session, "只有法官可以要求重新发牌")
@@ -584,6 +587,7 @@ async def kill(session: CommandSession):
         if user_id != game_instance.master:
             await send_at(session, "你不是法官，无权操作")
             return
+        game_instance.kill(id_)
         await asyncio.gather(send_at(session, f"{id_}号 死了。\n" + game_instance.game_briefing()),
                              game_instance.notify_to_master())
     except WerewolfGame.GameNotStarted:
