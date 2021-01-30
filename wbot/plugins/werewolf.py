@@ -6,6 +6,7 @@ __author__ = 'QAQAutoMaton and KunoiSayami'
 import asyncio
 import random
 import logging
+import sys
 from enum import Enum
 from typing import Optional
 
@@ -21,6 +22,10 @@ config_arg = "pwbynls"
 def cq_at(uid: int) -> str:
     return f"[CQ:at,qq={uid}] "
 
+
+if '--debug-bot' in sys.argv:
+    logging.basicConfig(level=logging.DEBUG,
+                        format='%(asctime)s - %(levelname)s - %(funcName)s - %(lineno)d - %(message)s')
 
 USAGE_TEXT = """用法：#set 配置 位置
 如： #set pwbynls 0
@@ -238,7 +243,7 @@ class WerewolfGame:
             raise IndexError
 
     async def stand(self, uid: int) -> bool:
-        return bool(await self.kick(uid))
+        return bool(await self.kick(self.uid_pool[uid]))
 
     def stop(self) -> str:
         if not self.running:
