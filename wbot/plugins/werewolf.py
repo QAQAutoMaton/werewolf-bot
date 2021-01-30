@@ -243,13 +243,19 @@ class WerewolfGame:
             raise IndexError
 
     async def stand(self, uid: int) -> bool:
-        return bool(await self.kick(self.uid_pool[uid]))
+        return bool(await self.kick(self.get_user_seat(uid)))
+
+    def get_user_seat(self, uid: int) -> int:
+        if uid == self.master:
+            return 0
+        return self.uid_pool[uid]
 
     def stop(self) -> str:
         if not self.running:
             raise WerewolfGame.GameNotStarted
+        ret = self.game_briefing(show_role=True, header='已经结束', override=True)
         self.clear()
-        return self.game_briefing(show_role=True, header='已经结束')
+        return ret
 
     def clear(self) -> None:
         self.running = False
@@ -262,8 +268,8 @@ class WerewolfGame:
     def empty(self) -> bool:
         return not self.uid_pool
 
-    def game_briefing(self, *, show_role: bool = False, header: str = '尚未开始') -> str:
-        if self.briefing_cache.is_changed:
+    def game_briefing(self, *, show_role: bool = False, header: str = '尚未开始', override: bool = False) -> str:
+        if self.briefing_cache.is_changed or override:
             self.briefing_cache = self.BriefingCache(self._game_briefing(show_role=show_role, header=header))
             logger.debug('Reset cache => %s', self.briefing_cache.briefing)
         else:
@@ -420,12 +426,12 @@ async def stand(session: CommandSession):
     if user_id == 80000000:
         await session.send('请解除匿名后再使用狼人杀功能')
         return
-    if group_id not in game:
+    if not (game_instance := game.get(group_id)):
         await send_at(session, '当前群还没有人使用狼人杀功能，请使用set命令开始')
         return
     try:
-        await game[group_id].stand(user_id)
-        await send_at(session, "退出成功，" + game[group_id].game_briefing())
+        await game_instance.stand(user_id)
+        await send_at(session, "退出成功，" + game_instance.game_briefing())
     except WerewolfGame.GameStarted:
         await send_at(session, "游戏已开始，请等待法官结束")
     except IndexError:
@@ -496,6 +502,7 @@ async def stop(session: CommandSession):
         return
     if user_id != game_instance.master:
         await send_at(session, "你不是法官，无权结束")
+        return
     try:
         logger.info('Stopping %d game...', group_id)
         await send_at(session, game_instance.stop())
