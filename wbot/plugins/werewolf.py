@@ -137,9 +137,9 @@ class WerewolfGame:
     def __init__(self, role: str):
         self._master: int = 0
         self.player_count: int = len(role)
-        self.uid_pool: list[int] = []
-        self.player_pool: list[Optional[PlayerWithoutRole]] = [None] * self.player_count
+        self.uid_pool: dict[int, int] = {}
         self.game_pool: list[Player] = []
+        self.player_pool: list[Optional[PlayerWithoutRole]] = [None] * self.player_count
         self._lock: asyncio.Lock = asyncio.Lock()
         self.role: str = role
         self.running: bool = False
@@ -169,7 +169,7 @@ class WerewolfGame:
             if self.player_pool[seat - 1] is not None:
                 raise WerewolfGame.PlayerSeatTaken
             logger.debug('Set %d to user %d', seat, uid)
-            self.uid_pool.append(uid)
+            self.uid_pool.update({uid: seat})
             # self.uid_pool.update({uid: seat})
             self.player_pool[seat - 1] = PlayerWithoutRole(uid, seat)
             self.briefing_cache.set_changed()
@@ -211,7 +211,7 @@ class WerewolfGame:
         awaiter = []
         all_roles = []
         for x in self.game_pool:
-            if x.role == Roles.werewolf:
+            if x.role in (Roles.werewolf, Roles.white_wolf_king):
                 werewolf.append(x.seat)
             awaiter.append(send_private(x.uid, f'你是 {x.seat} 号, 你的身份是 {x.role.value}'))
             all_roles.append(f'{x.seat}: {x.role.value}')
@@ -222,10 +222,11 @@ class WerewolfGame:
         for x in werewolf:
             copy = werewolf.copy()
             copy.remove(x)
-            awaiter.append(send_private(self.game_pool[x - 1].uid, f'你的狼队友有: {copy}'))
+            teammates = ', '.join(map(str, copy))
+            awaiter.append(send_private(self.game_pool[x - 1].uid, f'你的狼队友有: {teammates}'))
         await asyncio.gather(*awaiter)
 
-    async def kick(self, seat: Optional[int]) -> int:
+    async def kick(self, seat: int) -> int:
         if self.running:
             raise WerewolfGame.GameStarted
         if seat == 0:
@@ -233,16 +234,19 @@ class WerewolfGame:
             self._master = 0
             self.briefing_cache.set_changed()
             return ret
+        assert seat > 0
         async with self._lock:
             if self.player_pool[seat - 1] is not None:
                 uid = self.player_pool[seat - 1].uid
-                self.uid_pool.remove(uid)
+                self.uid_pool.pop(uid)
                 self.player_pool[seat - 1] = None
                 self.briefing_cache.set_changed()
                 return uid
             raise IndexError
 
     async def stand(self, uid: int) -> bool:
+        if self.running:
+            raise WerewolfGame.GameStarted
         return bool(await self.kick(self.get_user_seat(uid)))
 
     def get_user_seat(self, uid: int) -> int:
@@ -259,7 +263,7 @@ class WerewolfGame:
 
     def clear(self) -> None:
         self.running = False
-        self.uid_pool = []
+        self.uid_pool = {}
         self.game_pool = []
         self.player_pool = [None] * self.player_count
         self._master = 0
@@ -299,7 +303,7 @@ class WerewolfGame:
     def kill(self, index: int) -> None:
         if not self.running:
             raise WerewolfGame.GameNotStarted
-        if index == 0:
+        if index <= 0:
             raise IndexError
         self.game_pool[index - 1].set_player_dead()
         self.briefing_cache.set_changed()
@@ -566,6 +570,7 @@ async def resend(session: CommandSession):
 
     if user_id != game_instance.master:
         await send_at(session, "只有法官可以要求重新发牌")
+        return
     try:
         await game_instance.notify()
     except WerewolfGame.GameNotStarted:
@@ -584,7 +589,7 @@ async def kill(session: CommandSession):
     if user_id == 80000000:
         await session.send('请解除匿名后再使用狼人杀功能')
         return
-    if group_id not in game:
+    if not (game_instance := game.get(group_id)):
         await send_at(session, '当前群还没有人使用狼人杀功能，请使用set命令开始')
         return
 
@@ -597,11 +602,11 @@ async def kill(session: CommandSession):
         await send_at(session, "位置为一个[1..人数]之间的整数")
         return
 
+    if user_id != game_instance.master:
+        await send_at(session, "你不是法官，无权操作")
+        return
+
     try:
-        game_instance = game[group_id]
-        if user_id != game_instance.master:
-            await send_at(session, "你不是法官，无权操作")
-            return
         game_instance.kill(id_)
         await asyncio.gather(send_at(session, f"{id_}号 死了。\n" + game_instance.game_briefing()),
                              game_instance.notify_to_master())
