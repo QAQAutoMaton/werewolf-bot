@@ -194,7 +194,7 @@ class WerewolfGame:
         await self.notify()
 
     async def notify_to_master(self) -> None:
-        all_roles = '\n'.join([f'{x + 1}: {self.game_pool[x]}'
+        all_roles = '\n'.join([f'{x + 1}: {self.game_pool[x].role.value}'
                                for x in range(self.player_count) if self.game_pool[x].alive])
         await send_private(self._master, f'您是法官\n{all_roles}')
 
@@ -276,7 +276,7 @@ class WerewolfGame:
         player_list = []
         if self.running:
             for x in self.game_pool:
-                player_list.append(f'{x.seat}: {x.briefing(show_role)}')
+                player_list.append(f'{x.briefing(show_role)}')
         else:
             for x in range(self.player_count):
                 element = self.player_pool[x]
@@ -612,10 +612,9 @@ async def rand(session: CommandSession):
         return
     try:
         n = int(session.state['n'])
+        if n <= 0:
+            raise ValueError
     except ValueError:
-        await send_at(session, "n是一个>0的整数")
-        return
-    if n <= 0:
         await send_at(session, "n是一个>0的整数")
         return
 
