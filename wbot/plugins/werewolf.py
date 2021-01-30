@@ -82,7 +82,8 @@ class WerewolfGame:
         'b': Roles.white_wolf_king,
         's': Roles.guard,
         'y': Roles.prophet,
-        'n': Roles.witch
+        'n': Roles.witch,
+        'l': Roles.hunter
     }
 
     class BriefingCache:
@@ -282,7 +283,7 @@ class WerewolfGame:
                 element = self.player_pool[x]
                 player_list.append(f'{x + 1}: {cq_at(element.uid) if element is not None else "(Empty)"}')
         player_list = '\n'.join(player_list)
-        return f'{s}\n{player_list}\n为获取身份，请添加bot为好友。"'
+        return f'{s}\n{player_list}\n为获取身份，请添加bot为好友。'
 
     def kill(self, index: int) -> None:
         if not self.running:
@@ -388,6 +389,8 @@ async def sit(session: CommandSession):
             await send_at(session, "人数已满")
         except WerewolfGame.PlayerInReadyPool:
             await send_at(session, "你已经加入了")
+        except WerewolfGame.PlayerSeatTaken:
+            await send_at(session, "这个位置已经有人了")
     except ValueError:
         await send_at(session, "位置为一个[0..人数]之间的整数")
         return
