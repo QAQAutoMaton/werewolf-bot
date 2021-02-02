@@ -16,7 +16,7 @@ from nonebot import on_command, CommandSession, on_request, RequestSession, perm
 from config import *
 
 
-config_arg = "pwbynls"
+config_arg = "pwbynlsmq"
 
 
 def cq_at(uid: int) -> str:
@@ -27,9 +27,22 @@ if '--debug-bot' in sys.argv:
     logging.basicConfig(level=logging.DEBUG,
                         format='%(asctime)s - %(levelname)s - %(funcName)s - %(lineno)d - %(message)s')
 
-USAGE_TEXT = """用法：#set 配置 位置
-如： #set pwbynls 0
-其中p是平民，w是狼，b是白狼王，y是预言家，n是女巫，l是猎人，s是守卫
+HELP_TEXT = """这是lk的狼人杀bot，支持的功能有：
+#set 板子 位置 | 表示设定一个板子，并坐在某个位置(0是法官)，其中p是平民，w是狼，b是白狼王，y是预言家，n是女巫，l是猎人，s是守卫，q是丘比特，m是魔术师
+#sit 位置 | 表示坐在某个座位
+#stand
+#start
+#status | 查询当前的状态(包括每个位置上的人，存活信息，游戏是否开始)
+#stop | 仅法官可以使用
+#rand 上界 | 随机一个不超过上界的正整数
+#resend | 仅法官可以使用，重新给每个人发牌
+#kill | 仅法官可以使用，记录一个人死了
+祝大家使用愉快，欢迎给 https://github.com/QAQAutoMaton/werewolf-bot Star!
+"""
+
+SETTING_USAGE_TEXT = """用法：#set 配置 位置
+如： #set pwbynlsqm 0
+其中p是平民，w是狼，b是白狼王，y是预言家，n是女巫，l是猎人，s是守卫，q是丘比特，m是魔术师
 位置为0和人数之间的整数，其中0是法官
 """
 
@@ -45,6 +58,8 @@ class Roles(Enum):
     hunter = '猎人'
     guard = '守卫'
     white_wolf_king = '白狼王'
+    cupid = '丘比特'
+    magician = '魔术师'
 
 
 class PlayerWithoutRole:
@@ -88,7 +103,9 @@ class WerewolfGame:
         's': Roles.guard,
         'y': Roles.prophet,
         'n': Roles.witch,
-        'l': Roles.hunter
+        'l': Roles.hunter,
+        'q': Roles.cupid,
+        'm': Roles.magician
     }
 
     class BriefingCache:
@@ -202,7 +219,7 @@ class WerewolfGame:
     async def notify_to_master(self) -> None:
         all_roles = '\n'.join([f'{x + 1}: {self.game_pool[x].role.value}'
                                for x in range(self.player_count) if self.game_pool[x].alive])
-        await send_private(self._master, f'您是法官\n{all_roles}')
+        await send_private(self._master, f'当前还活着的有：\n{all_roles}')
 
     async def notify(self) -> None:
         if not self.running:
@@ -213,17 +230,15 @@ class WerewolfGame:
         for x in self.game_pool:
             if x.role in (Roles.werewolf, Roles.white_wolf_king):
                 werewolf.append(x.seat)
-            awaiter.append(send_private(x.uid, f'你是 {x.seat} 号, 你的身份是 {x.role.value}'))
+
+        for x in self.game_pool:
+            message = f'你是 {x.seat} 号, 你的身份是 {x.role.value}'
+            if x.role in (Roles.werewolf, Roles.white_wolf_king):
+                message += f'，您的狼队友有{werewolf}'
+            awaiter.append(send_private(x.uid, message))
             all_roles.append(f'{x.seat}: {x.role.value}')
         all_roles = '\n'.join(all_roles)
         awaiter.append(send_private(self._master, f'您是法官\n{all_roles}'))
-        await asyncio.gather(*awaiter)
-        awaiter.clear()
-        for x in werewolf:
-            copy = werewolf.copy()
-            copy.remove(x)
-            teammates = ', '.join(map(str, copy))
-            awaiter.append(send_private(self.game_pool[x - 1].uid, f'你的狼队友有: {teammates}'))
         await asyncio.gather(*awaiter)
 
     async def kick(self, seat: int) -> int:
@@ -339,7 +354,7 @@ async def setting(session: CommandSession) -> None:
             return
 
     if 'role' not in session.state:
-        await send_at(session, USAGE_TEXT)
+        await send_at(session, SETTING_USAGE_TEXT)
         return
     else:
         role = session.state['role']
@@ -650,6 +665,19 @@ async def rand_parser(session: CommandSession):
     if len(args) == 1:
         session.state['n'] = args[0]
 
+@on_command('help', aliases=('帮助'), only_to_me=False, permission=perm.GROUP)
+async def help(session: CommandSession):
+    group_id = session.event.group_id
+    user_id = session.event.user_id
+
+    if not group_id:
+        await session.send('请在群聊中使用狼人杀功能')
+        return
+
+    if user_id == 80000000:
+        await session.send('请解除匿名后再使用狼人杀功能')
+        return
+    await send_at(session, HELP_TEXT)
 
 @on_request('friend')
 async def friend_request(session: RequestSession):
