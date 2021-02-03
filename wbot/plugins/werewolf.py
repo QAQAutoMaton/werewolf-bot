@@ -8,15 +8,12 @@ import random
 import logging
 import sys
 from enum import Enum
-from typing import Optional
+from typing import Optional, Union
 
 import nonebot
 from nonebot import on_command, CommandSession, on_request, RequestSession, permission as perm
 
 from config import *
-
-
-config_arg = "pwbynlsmq"
 
 
 def cq_at(uid: int) -> str:
@@ -69,8 +66,8 @@ class PlayerWithoutRole:
 
 
 class Player(PlayerWithoutRole):
-    class PlayerAlreadyDead(Exception):
-        pass
+    class PlayerStatus(Enum):
+        PlayerAlreadyDead = 'PlayerAlreadyDead'
 
     def __init__(self, uid: int, role: Roles, seat: int):
         super().__init__(uid, seat)
@@ -85,9 +82,9 @@ class Player(PlayerWithoutRole):
         return f'{self.seat}: {cq_at(self.uid)} ' \
                f'{self.role.value if show_role else ""} {"" if self.alive else "[已死亡]"}'
 
-    def set_player_dead(self) -> None:
+    def set_player_dead(self) -> Optional[PlayerStatus]:
         if not self._alive:
-            raise Player.PlayerAlreadyDead
+            return Player.PlayerStatus.PlayerAlreadyDead
         self._alive = False
 
     @classmethod
@@ -124,32 +121,16 @@ class WerewolfGame:
     class BaseGameException(Exception):
         pass
 
-    class PlayerException(BaseGameException):
-        pass
+    class GameStatus(Enum):
+        GameStarted = 'GameStarted'
+        GameNotStarted = 'GameNotStarted'
+        JudgeNotFound = 'JudgeNotFound'
 
-    class GameException(BaseGameException):
-        pass
-
-    class PlayerFull(PlayerException):
-        pass
-
-    class GameStarted(GameException):
-        pass
-
-    class PlayerNotEnough(PlayerException):
-        pass
-
-    class PlayerInReadyPool(PlayerException):
-        pass
-
-    class GameNotStarted(GameException):
-        pass
-
-    class PlayerSeatTaken(PlayerException):
-        pass
-
-    class JudgeNotFound(GameException):
-        pass
+    class PlayerStatus(Enum):
+        PlayerFull = 'PlayerFull'
+        PlayerNotEnough = 'PlayerNotEnough'
+        PlayerInReadyPool = 'PlayerInReadyPool'
+        PlayerSeatTaken = 'PlayerSeatTaken'
 
     def __init__(self, role: str):
         self._master: int = 0
@@ -169,38 +150,40 @@ class WerewolfGame:
     @master.setter
     def master(self, value: int) -> None:
         if self.running:
-            raise WerewolfGame.GameStarted
+            raise WerewolfGame.BaseGameException("Game started")
         self._master = value
 
-    async def join(self, uid: int, seat: int) -> None:
+    async def join(self, uid: int, seat: int) -> Optional[Union[PlayerStatus, GameStatus]]:
         if seat == 0:
+            if self.running:
+                return WerewolfGame.GameStatus.GameStarted
             self.master = uid
             logger.debug('Set master to user %d', uid)
             self.briefing_cache.set_changed()
             return
         async with self._lock:
             if len(self.uid_pool) >= self.player_count:
-                raise WerewolfGame.PlayerFull
+                return WerewolfGame.PlayerStatus.PlayerFull
             if uid in self.uid_pool or uid == self._master:
-                raise WerewolfGame.PlayerInReadyPool
+                return WerewolfGame.PlayerStatus.PlayerInReadyPool
             if self.player_pool[seat - 1] is not None:
-                raise WerewolfGame.PlayerSeatTaken
+                return WerewolfGame.PlayerStatus.PlayerSeatTaken
             logger.debug('Set %d to user %d', seat, uid)
             self.uid_pool.update({uid: seat})
             # self.uid_pool.update({uid: seat})
             self.player_pool[seat - 1] = PlayerWithoutRole(uid, seat)
             self.briefing_cache.set_changed()
 
-    async def start(self) -> None:
+    async def start(self) -> Optional[GameStatus]:
         if self.running:
             logger.warning('Game is running')
-            raise WerewolfGame.GameStarted
+            return WerewolfGame.GameStatus.GameStarted
         if self.player_count != len(self.uid_pool):
             logger.warning('Player not enough')
-            raise WerewolfGame.PlayerNotEnough
+            return WerewolfGame.GameStatus.PlayerNotEnough
         if self.master == 0:
             logger.warning('Judge not found')
-            raise WerewolfGame.JudgeNotFound
+            return WerewolfGame.GameStatus.JudgeNotFound
         self.running = True
         random.shuffle(self.player_pool)
         for role_str, role_ in self.ROLE_MAPPING.items():
@@ -221,9 +204,9 @@ class WerewolfGame:
                                for x in range(self.player_count) if self.game_pool[x].alive])
         await send_private(self._master, f'当前还活着的有：\n{all_roles}')
 
-    async def notify(self) -> None:
+    async def notify(self) -> Optional[GameStatus]:
         if not self.running:
-            raise WerewolfGame.GameNotStarted
+            return WerewolfGame.GameStatus.GameNotStarted
         werewolf = []
         awaiter = []
         all_roles = []
@@ -241,9 +224,9 @@ class WerewolfGame:
         awaiter.append(send_private(self._master, f'您是法官\n{all_roles}'))
         await asyncio.gather(*awaiter)
 
-    async def kick(self, seat: int) -> int:
+    async def kick(self, seat: int) -> Union[int, GameStatus]:
         if self.running:
-            raise WerewolfGame.GameStarted
+            return WerewolfGame.GameStatus.GameStarted
         if seat == 0:
             ret = self._master
             self._master = 0
@@ -259,9 +242,9 @@ class WerewolfGame:
                 return uid
             raise IndexError
 
-    async def stand(self, uid: int) -> bool:
+    async def stand(self, uid: int) -> Union[bool, GameStatus]:
         if self.running:
-            raise WerewolfGame.GameStarted
+            return WerewolfGame.GameStatus.GameStarted
         return bool(await self.kick(self.get_user_seat(uid)))
 
     def get_user_seat(self, uid: int) -> int:
@@ -269,9 +252,9 @@ class WerewolfGame:
             return 0
         return self.uid_pool[uid]
 
-    def stop(self) -> str:
+    def stop(self) -> Union[str, GameStatus]:
         if not self.running:
-            raise WerewolfGame.GameNotStarted
+            return WerewolfGame.GameStatus.GameNotStarted
         ret = self.game_briefing(show_role=True, header='已经结束', override=True)
         self.clear()
         return ret
@@ -315,15 +298,21 @@ class WerewolfGame:
         player_list = '\n'.join(player_list)
         return f'{s}\n{player_list}\n为获取身份，请添加bot为好友。'
 
-    def kill(self, index: int) -> None:
+    def kill(self, index: int) -> Optional[Union[GameStatus, Player.PlayerStatus]]:
         if not self.running:
-            raise WerewolfGame.GameNotStarted
+            return WerewolfGame.GameStatus.GameNotStarted
         if index <= 0:
             raise IndexError
-        self.game_pool[index - 1].set_player_dead()
+        if rt := self.game_pool[index - 1].set_player_dead():
+            return rt
         self.briefing_cache.set_changed()
 
 
+def get_config_arg() -> str:
+    return ''.join(k for k, v in WerewolfGame.ROLE_MAPPING.items())
+
+
+config_arg = get_config_arg()
 game: dict[int, WerewolfGame] = {}
 
 
@@ -363,7 +352,7 @@ async def setting(session: CommandSession) -> None:
             return
 
         if not (seat := session.state.get('seat')):
-            await send_at(session, USAGE_TEXT)
+            await send_at(session, SETTING_USAGE_TEXT)
             return
 
         try:
@@ -410,20 +399,19 @@ async def sit(session: CommandSession):
         return
     try:
         seat = int(session.state['seat'])
-        try:
-            await game[group_id].join(user_id, seat)
-            await send_at(session, "加入成功，" + game[group_id].game_briefing())
-        except WerewolfGame.GameStarted:
-            await send_at(session, "游戏已经开始")
-        except WerewolfGame.PlayerFull:
-            await send_at(session, "人数已满")
-        except WerewolfGame.PlayerInReadyPool:
-            await send_at(session, "你已经加入了")
-        except WerewolfGame.PlayerSeatTaken:
-            await send_at(session, "这个位置已经有人了")
+        if rt := await game[group_id].join(user_id, seat):
+            if rt is WerewolfGame.GameStatus.GameStarted:
+                await send_at(session, "游戏已经开始")
+            elif rt is WerewolfGame.PlayerStatus.PlayerFull:
+                await send_at(session, "人数已满")
+            elif rt is WerewolfGame.PlayerStatus.PlayerInReadyPool:
+                await send_at(session, "你已经加入了")
+            elif rt is WerewolfGame.PlayerStatus.PlayerSeatTaken:
+                await send_at(session, "这个位置已经有人了")
+            return
+        await send_at(session, "加入成功，" + game[group_id].game_briefing())
     except ValueError:
         await send_at(session, "位置为一个[0..人数]之间的整数")
-        return
 
 
 @sit.args_parser
@@ -449,10 +437,11 @@ async def stand(session: CommandSession):
         await send_at(session, '当前群还没有人使用狼人杀功能，请使用set命令开始')
         return
     try:
-        await game_instance.stand(user_id)
+        if rt := await game_instance.stand(user_id):
+            if rt is WerewolfGame.GameStatus.GameStarted:
+                await send_at(session, "游戏已开始，请等待法官结束")
+            return
         await send_at(session, "退出成功，" + game_instance.game_briefing())
-    except WerewolfGame.GameStarted:
-        await send_at(session, "游戏已开始，请等待法官结束")
     except IndexError:
         await send_at(session, "你并没有加入")
 
@@ -493,15 +482,15 @@ async def start(session: CommandSession):
     if user_id not in g.uid_pool and user_id != g.master:
         await send_at(session, "你还没有加入游戏")
         return
-    try:
-        await g.start()
-        await send_at(session, g.game_briefing())
-    except WerewolfGame.GameStarted:
-        await send_at(session, "游戏已经开始")
-    except WerewolfGame.PlayerNotEnough:
-        await send_at(session, "人数不足，无法开始")
-    except WerewolfGame.JudgeNotFound:
-        await send_at(session, "这场游戏还没有法官噢")
+    if rt := await g.start():
+        if rt is WerewolfGame.GameStatus.GameStarted:
+            await send_at(session, "游戏已经开始")
+        elif rt is WerewolfGame.PlayerStatus.PlayerNotEnough:
+            await send_at(session, "人数不足，无法开始")
+        elif rt is WerewolfGame.GameStatus.JudgeNotFound:
+            await send_at(session, "这场游戏还没有法官噢")
+        return
+    await send_at(session, g.game_briefing())
 
 
 @on_command('stop', aliases=('jieshu', 'js', '结束'), only_to_me=False, permission=perm.GROUP)
@@ -522,10 +511,10 @@ async def stop(session: CommandSession):
     if user_id != game_instance.master:
         await send_at(session, "你不是法官，无权结束")
         return
-    try:
-        logger.info('Stopping %d game...', group_id)
-        await send_at(session, game_instance.stop())
-    except WerewolfGame.GameNotStarted:
+    logger.info('Stopping %d game...', group_id)
+    if isinstance(rt := game_instance.stop(), str):
+        await send_at(session, rt)
+    elif rt is WerewolfGame.GameStatus.GameStarted:
         await send_at(session, '未开始')
 
 
@@ -552,10 +541,11 @@ async def kick(session: CommandSession):
         return
 
     try:
-        w = await game[group_id].kick(at)
-        await send_at(session, f"踢出{cq_at(w)}成功，\n{game[group_id].game_briefing()}")
-    except WerewolfGame.GameStarted:
-        await send_at(session, "游戏已经开始")
+        if w := await game[group_id].kick(at):
+            if isinstance(w, WerewolfGame.GameStatus) and w is WerewolfGame.GameStatus.GameStarted:
+                await send_at(session, "游戏已经开始")
+                return
+            await send_at(session, f"踢出{cq_at(w)}成功，\n{game[group_id].game_briefing()}")
     except IndexError:
         await send_at(session, "此位置没有人/玩家不存在")
 
@@ -586,10 +576,10 @@ async def resend(session: CommandSession):
     if user_id != game_instance.master:
         await send_at(session, "只有法官可以要求重新发牌")
         return
-    try:
-        await game_instance.notify()
-    except WerewolfGame.GameNotStarted:
-        await send_at(session, "未开始")
+
+    if rt := await game_instance.notify():
+        if rt is WerewolfGame.GameStatus.GameNotStarted:
+            await send_at(session, "未开始")
 
 
 @on_command('kill', aliases='杀', only_to_me=False, permission=perm.GROUP)
@@ -622,13 +612,14 @@ async def kill(session: CommandSession):
         return
 
     try:
-        game_instance.kill(id_)
+        if rt := game_instance.kill(id_):
+            if rt is WerewolfGame.GameStatus.GameNotStarted:
+                await send_at(session, "未开始")
+            elif rt is Player.PlayerStatus.PlayerAlreadyDead:
+                await send_at(session, f"{id_}号已经死过了。")
+            return
         await asyncio.gather(send_at(session, f"{id_}号 死了。\n" + game_instance.game_briefing()),
                              game_instance.notify_to_master())
-    except WerewolfGame.GameNotStarted:
-        await send_at(session, "未开始")
-    except Player.PlayerAlreadyDead:
-        await send_at(session, f"{id_}号已经死过了。")
     except IndexError:
         await send_at(session, "位置为一个[1..人数]之间的整数")
 
@@ -665,8 +656,9 @@ async def rand_parser(session: CommandSession):
     if len(args) == 1:
         session.state['n'] = args[0]
 
-@on_command('help', aliases=('帮助'), only_to_me=False, permission=perm.GROUP)
-async def help(session: CommandSession):
+
+@on_command('help', aliases='帮助', only_to_me=False, permission=perm.GROUP)
+async def help_command(session: CommandSession):
     group_id = session.event.group_id
     user_id = session.event.user_id
 
@@ -678,6 +670,7 @@ async def help(session: CommandSession):
         await session.send('请解除匿名后再使用狼人杀功能')
         return
     await send_at(session, HELP_TEXT)
+
 
 @on_request('friend')
 async def friend_request(session: RequestSession):
