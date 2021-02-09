@@ -391,7 +391,7 @@ async def sit(session: CommandSession):
     if user_id == 80000000:
         await session.send('请解除匿名后再使用狼人杀功能')
         return
-    if group_id not in game:
+    if not (game_instance := game.get(group_id)):
         await send_at(session, '当前群没有设定板子，请使用set命令设置')
         return
     if 'seat' not in session.state:
@@ -399,7 +399,9 @@ async def sit(session: CommandSession):
         return
     try:
         seat = int(session.state['seat'])
-        if rt := await game[group_id].join(user_id, seat):
+        if seat < 0:
+            raise ValueError
+        if rt := await game_instance.join(user_id, seat):
             if rt is WerewolfGame.GameStatus.GameStarted:
                 await send_at(session, "游戏已经开始")
             elif rt is WerewolfGame.PlayerStatus.PlayerFull:
@@ -409,7 +411,7 @@ async def sit(session: CommandSession):
             elif rt is WerewolfGame.PlayerStatus.PlayerSeatTaken:
                 await send_at(session, "这个位置已经有人了")
             return
-        await send_at(session, "加入成功，" + game[group_id].game_briefing())
+        await send_at(session, "加入成功，" + game_instance.game_briefing())
     except ValueError:
         await send_at(session, "位置为一个[0..人数]之间的整数")
 
@@ -536,6 +538,8 @@ async def kick(session: CommandSession):
         return
     try:
         at = int(session.state['at'])
+        if at < 0:
+            raise ValueError
     except ValueError:
         await send_at(session, "位置为一个[0..准备人数]之间的整数/QQ号")
         return
