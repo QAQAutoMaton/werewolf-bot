@@ -1,0 +1,30 @@
+CREATE TABLE roles(
+   id INTEGER PRIMARY KEY AUTOINCREMENT,
+   name TEXT NOT NULL,
+   thief INT DEFAULT 0,
+   del INT 
+);
+CREATE TABLE roles_alias(
+	id INT NOT NULL,
+	name TEXT NOT NULL
+);
+CREATE TABLE roles_identity(
+	id INT NOT NULL,
+	name TEXT NOT NULL,
+	type int NOT NULL
+);
+CREATE TABLE game(
+   id INT PRIMARY KEY NOT NULL,
+   group_id INT NOT NULL,
+   role INT NOT NULL,
+   result TEXT
+);
+CREATE TABLE game_participant(
+	qq INT NOT NULL,
+	role TEXT NOT NULL,
+	identity TEXT NOT NULL
+);
+CREATE TABLE permission(
+	qq INT  UNIQUE,
+	permission INT DEFAULT 1
+);
