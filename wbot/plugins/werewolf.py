@@ -34,6 +34,8 @@ class Game:
         self.alive = []
         self.running = False
         self.online = False
+        self.onVote = False
+        self.vote = []
 
     def empty(self, uid=-1):
         for one in self.player:
@@ -51,6 +53,7 @@ class Game:
         self.alive = [True]*(self.player_num+1)
         self.running = False
         self.player = [0]*(self.player_num+1)
+        self.onVote = False
 
     def sit(self, uid, pos):
         if pos > self.player_num or pos < 0:
@@ -335,7 +338,7 @@ async def start(session: CommandSession):
 
 
 @on_command('resend', aliases=('重发'), only_to_me=False, permission=perm.GROUP)
-async def rereply(session: CommandSession):
+async def resend(session: CommandSession):
     group_id = session.event.group_id
     user_id = session.event.user_id
     if not group_id:
@@ -716,6 +719,118 @@ async def rand_parser(session: CommandSession):
     args = session.current_arg_text.strip().split()
     if len(args) == 1:
         session.state['n'] = args[0]
+
+
+vote_usage = """用法：群中#vote start #vote end表示开始投票和结束投票
+私聊bot#vote x表示给x号投票(一经投票不能修改)
+法官私聊bot#vote x表示删除x号的投票
+"""
+
+
+@on_command('vote', aliases=('投票'), only_to_me=False, permission=perm.EVERYBODY)
+async def vote(session: CommandSession):
+    if 'text' not in session.state:
+        await reply(session, vote_usage)
+    text = session.state['text']
+    group_id = session.event.group_id
+    user_id = session.event.user_id
+    if user_id == 80000000:
+        await session.send('请解除匿名后再使用狼人杀功能')
+        return
+
+    if not group_id:
+
+        text = int(text)
+        if not in_game[user_id]:
+            await reply(session, "你没有加入游戏")
+            return
+        group_id = in_game[user_id]
+        g = game[group_id]
+        if not g.running:
+            await reply(session, "游戏未开始")
+            return
+        pos = g.player.index(user_id)
+        try:
+            text = int(text)
+            if text < 0 or text > g.player_num:
+                raise ValueError
+        except ValueError:
+            await reply(session, vote_usage)
+            return
+        if pos == 0:
+            if not g.alive[text]:
+                await reply(session, f"{text}号已经死了")
+                return
+            if g.vote[text] == -1:
+                await reply(session, f"{text}号没有投票")
+                return
+            g.vote[text] = -1
+
+            await send_private(g.player[text], "您的票被法官删除")
+            notvoted = []
+            for i in range(1, g.player_num+1):
+                if g.alive[i] and g.vote[i] == -1:
+                    notvoted.append(i)
+            await reply(session, f"{text}号的票已被删除,还有{notvoted}号没投票")
+        else:
+            if not g.alive[pos]:
+                await reply(session, "你已经死了")
+                return
+            if not g.alive[text] and text > 0:
+                await reply(session, f"{text}号已经死了")
+                return
+            if g.vote[pos] >= 0:
+                await reply(session, "你已经投过票了")
+                return
+            g.vote[pos] = text
+            await reply(session, f"{pos}->{text}")
+            notvoted = []
+            for i in range(1, g.player_num+1):
+                if g.alive[i] and g.vote[i] == -1:
+                    notvoted.append(i)
+            await send_private(g.player[0], f"{pos}号投给{text}号，还有{notvoted}号没有投票")
+    else:
+        if group_id not in game:
+            await send_at(session, '当前群还没有人使用狼人杀功能，请使用set命令开始')
+            return
+        g = game[group_id]
+        if not g.running:
+            await reply(session, "未开始")
+            return
+        if user_id != g.player[0]:
+            await reply(session, "只有法官可以使用此命令")
+            return
+        if text == "start":
+            if g.onVote:
+                await send_at(session, "上一次投票还没结束")
+                return
+            g.onVote = True
+            g.vote = [-1]*(g.player_num+1)
+            await send_at(session, "法官开启了投票，请私聊bot #vote x表示向x号投票(其中vote 0表示弃票，一经投票不能修改)")
+        elif text == "end":
+            if not g.onVote:
+                await send_at(session, "未开启投票")
+                return
+            g.onVote = False
+            vote = [[] for i in range(g.player_num+1)]
+            for i in range(1, g.player_num+1):
+                if g.alive[i]:
+                    vote[max(g.vote[i], 0)].append(i)
+            text = "投票结果：\n"
+            for i in range(g.player_num+1):
+                if len(vote[i]):
+                    text += f"{i} <- {vote[i]}\n"
+            text = text[:-1]
+            await send_at(session, text)
+        else:
+            await send_at(session, vote_usage)
+
+
+@vote.args_parser
+async def vote_parser(session: CommandSession):
+    args = session.current_arg_text.strip().split()
+    if len(args) == 1:
+        session.state['text'] = args[0]
 
 
 @on_request('friend')
